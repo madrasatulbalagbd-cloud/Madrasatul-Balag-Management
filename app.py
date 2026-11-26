@@ -68,15 +68,23 @@ def init_database():
         ("সাধারণ ফান্ড", "সাধারণ"),
         ("বোর্ডিং ফান্ড", "বোর্ডিং"),
         ("নির্মাণ ও উন্নয়ন ফান্ড", "উন্নয়ন"),
-        ("মসজিদ ফান্ড", "বিশেষ"),
-        ("যাকাত ফান্ড", "শরয়ী"),
-        ("ফিতরা ফান্ড", "শরয়ী"),
-        ("চামড়া ফান্ড", "শরয়ী"),
-        ("গোরাবা ফান্ড", "শরয়ী"),
-        ("সদকা ফান্ড", "শরয়ী")
+        ("মসজিদ ফান্ড", "মসজিদ ফান্ড"),
+        ("গোরাবা ফান্ড", "গোরাবা ফান্ড")
     ]
     for fund_name, f_type in default_funds:
         cursor.execute("INSERT OR IGNORE INTO funds (name, type, balance) VALUES (?, ?, 0.0)", (fund_name, f_type))
+
+    # পুরোনো আলাদা শরয়ী ফান্ডগুলোকে নিরাপদে একত্র করে গোরাবা ফান্ডে নেওয়া
+    old_goraba_funds = ["যাকাত ফান্ড", "ফিতরা ফান্ড", "চামড়া ফান্ড", "সদকা ফান্ড"]
+    for old_fund in old_goraba_funds:
+        cursor.execute("SELECT balance FROM funds WHERE name = ?", (old_fund,))
+        old_row = cursor.fetchone()
+        if old_row is not None:
+            old_balance = old_row[0] or 0.0
+            if old_balance:
+                cursor.execute("UPDATE funds SET balance = balance + ? WHERE name = 'গোরাবা ফান্ড'", (old_balance,))
+            cursor.execute("UPDATE transactions SET fund_name = 'গোরাবা ফান্ড' WHERE fund_name = ?", (old_fund,))
+            cursor.execute("DELETE FROM funds WHERE name = ?", (old_fund,))
 
     conn.commit()
     conn.close()
@@ -144,9 +152,9 @@ def load_accounting_data():
     
     cursor.execute("SELECT name FROM funds")
     funds = [f[0] for f in cursor.fetchall()]
-    combo_acc_fund['values'] = funds
+    combo_acc_fund['values'] = [FUND_DISPLAY.get(f, f) for f in funds]
     if funds and not combo_acc_fund.get():
-        combo_acc_fund.set(funds[0])
+        combo_acc_fund.set(FUND_DISPLAY.get(funds[0], funds[0]))
     conn.close()
 
 def load_funds_data():
@@ -176,28 +184,61 @@ def load_students_data():
         tree_st.insert("", tk.END, values=row)
     conn.close()
 
-def auto_select_fund(event=None):
-    selected_cat = combo_acc_cat.get()
+FUND_DISPLAY = {
+    "সাধারণ ফান্ড": "সাধারণ ফান্ড",
+    "বোর্ডিং ফান্ড": "বোর্ডিং ফান্ড",
+    "নির্মাণ ও উন্নয়ন ফান্ড": "নির্মাণ ও উন্নয়ন ফান্ড",
+    "মসজিদ ফান্ড": "মসজিদ ফান্ড",
+    "গোরাবা ফান্ড": "গোরাবা (যাকাত, ফিতরা, সদকা, মান্নত, চামড়া)"
+}
+FUND_BY_DISPLAY = {v: k for k, v in FUND_DISPLAY.items()}
 
-    # গোরাবা সংক্রান্ত সব আয়/ব্যয় একই ফান্ডে যাবে
-    if any(word in selected_cat for word in ["যাকাত", "ফিতরা", "সদকা", "মান্নত", "চামড়া", "গোরাবা"]):
-        combo_acc_fund.set("গোরাবা ফান্ড")
-
-    # বোর্ডিং সংক্রান্ত খাত
-    elif "খোরাকি" in selected_cat or "বোর্ডিং" in selected_cat:
-        combo_acc_fund.set("বোর্ডিং ফান্ড")
-
-    # নির্মাণ ও উন্নয়ন
-    elif "নির্মাণ" in selected_cat or "উন্নয়ন" in selected_cat:
-        combo_acc_fund.set("নির্মাণ ও উন্নয়ন ফান্ড")
-
-    # মসজিদ
-    elif "মসজিদ" in selected_cat:
-        combo_acc_fund.set("মসজিদ ফান্ড")
-
-    # অন্যান্য সাধারণ খাত
+def set_categories_for_fund(fund_name, preferred_category=None):
+    t_type = combo_acc_type.get()
+    if t_type == "আয়":
+        fund_categories = {
+            "সাধারণ ফান্ড": ["ভর্তি ফি", "মাসিক বেতন", "আবাসন ফি", "পরীক্ষার ফি", "বিদ্যুৎ বিল", "সাধারণ অনুদান", "ফসল/ভাড়া", "বিবিধ"],
+            "বোর্ডিং ফান্ড": ["খোরাকি"],
+            "নির্মাণ ও উন্নয়ন ফান্ড": ["নির্মাণ ও উন্নয়ন"],
+            "মসজিদ ফান্ড": ["মসজিদ ফান্ড"],
+            "গোরাবা ফান্ড": ["গোরাবা"]
+        }
     else:
-        combo_acc_fund.set("সাধারণ ফান্ড")
+        fund_categories = {
+            "সাধারণ ফান্ড": expense_categories,
+            "বোর্ডিং ফান্ড": ["ছাত্রদের খাবার ও বোর্ডিং খরচ"],
+            "নির্মাণ ও উন্নয়ন ফান্ড": ["অফিস ও মাদরাসা মেরামত / রক্ষণাবেক্ষণ"],
+            "মসজিদ ফান্ড": ["মসজিদ ফান্ড"],
+            "গোরাবা ফান্ড": ["গোরাবা"]
+        }
+    categories = fund_categories.get(fund_name, income_categories if t_type == "আয়" else expense_categories)
+    combo_acc_cat['values'] = categories
+    if preferred_category and preferred_category in categories:
+        combo_acc_cat.set(preferred_category)
+    elif categories:
+        combo_acc_cat.set(categories[0])
+    check_category_selection(None)
+
+def auto_select_fund(event=None):
+    selected_cat = combo_acc_cat.get().strip()
+    if selected_cat == "গোরাবা":
+        fund_name = "গোরাবা ফান্ড"
+    elif selected_cat == "মসজিদ ফান্ড":
+        fund_name = "মসজিদ ফান্ড"
+    elif selected_cat in ["খোরাকি", "ছাত্রদের খাবার ও বোর্ডিং খরচ"]:
+        fund_name = "বোর্ডিং ফান্ড"
+    elif selected_cat == "নির্মাণ ও উন্নয়ন":
+        fund_name = "নির্মাণ ও উন্নয়ন ফান্ড"
+    elif selected_cat == "অফিস ও মাদরাসা মেরামত / রক্ষণাবেক্ষণ":
+        fund_name = "নির্মাণ ও উন্নয়ন ফান্ড"
+    else:
+        fund_name = "সাধারণ ফান্ড"
+    combo_acc_fund.set(FUND_DISPLAY.get(fund_name, fund_name))
+
+def fund_selected(event=None):
+    display_name = combo_acc_fund.get()
+    fund_name = FUND_BY_DISPLAY.get(display_name, display_name)
+    set_categories_for_fund(fund_name)
 
 def load_staff_data():
     for row in tree_stf.get_children():
@@ -269,7 +310,8 @@ combo_acc_type.set("আয়")
 combo_acc_type.grid(row=0, column=1, pady=5, sticky="w")
 
 tk.Label(frame_acc_inputs, text="ফান্ড নির্বাচন:", font=("Kalpurush", 10)).grid(row=0, column=2, sticky="w", pady=5, padx=(15, 0))
-combo_acc_fund = ttk.Combobox(frame_acc_inputs, font=("Kalpurush", 10), width=18, state="readonly")
+combo_acc_fund = ttk.Combobox(frame_acc_inputs, font=("Kalpurush", 10), width=38, state="readonly")
+combo_acc_fund['values'] = list(FUND_DISPLAY.values())
 combo_acc_fund.grid(row=0, column=3, pady=5, sticky="w")
 
 income_categories = [
@@ -281,11 +323,6 @@ income_categories = [
     "পরীক্ষার ফি",
     "সাধারণ অনুদান",
     "গোরাবা",
-    "যাকাত",
-    "ফিতরা",
-    "মান্নত",
-    "চামড়া",
-    "সদকা",
     "নির্মাণ ও উন্নয়ন",
     "মসজিদ ফান্ড",
     "ফসল/ভাড়া",
@@ -293,20 +330,20 @@ income_categories = [
 ]
 
 expense_categories = [
-    "১. শিক্ষক ও কর্মচারীদের বেতন",
-    "২. মেহমানদারী",
-    "৩. ছাত্রদের খাবার ও বোর্ডিং খরচ",
-    "৪. গোরাবা",
-    "৫. বিদ্যুৎ, গ্যাস ও ইউটিলিটি বিল",
-    "৬. অফিস ও মাদরাসা মেরামত / রক্ষণাবেক্ষণ",
-    "৭. বই, খাতা ও শিক্ষা সামগ্রী ক্রয়",
-    "৮. প্রিন্টিং ও স্টেশনারি খরচ",
-    "৯. প্রচারণা",
-    "১০. অনুষ্ঠান ও মাহফিল খরচ",
-    "১১. পরিবহন ও যাতায়াত খরচ",
-    "১২. ইন্টারনেট ও মোবাইল বিল",
-    "১৩. পরিষ্কার-পরিচ্ছন্নতা ও চিকিৎসা সামগ্রী",
-    "১৪. অন্যান্য প্রশাসনিক ব্যয়"
+    "শিক্ষক ও কর্মচারীদের বেতন",
+    "মেহমানদারী",
+    "ছাত্রদের খাবার ও বোর্ডিং খরচ",
+    "গোরাবা",
+    "বিদ্যুৎ, গ্যাস ও ইউটিলিটি বিল",
+    "অফিস ও মাদরাসা মেরামত / রক্ষণাবেক্ষণ",
+    "বই, খাতা ও শিক্ষা সামগ্রী ক্রয়",
+    "প্রিন্টিং ও স্টেশনারি খরচ",
+    "প্রচারণা",
+    "অনুষ্ঠান ও মাহফিল খরচ",
+    "পরিবহন ও যাতায়াত খরচ",
+    "ইন্টারনেট ও মোবাইল বিল",
+    "পরিষ্কার-পরিচ্ছন্নতা ও চিকিৎসা সামগ্রী",
+    "অন্যান্য প্রশাসনিক ব্যয়"
 ]
 
 tk.Label(frame_acc_inputs, text="খাত নির্বাচন:", font=("Kalpurush", 10)).grid(row=0, column=4, sticky="w", pady=5, padx=(15, 0))
@@ -329,21 +366,21 @@ def check_category_selection(event):
         entry_bibidh_detail.pack_forget()
         entry_bibidh_detail.delete(0, tk.END)
 
-def update_category_list(event):
+def update_category_list(event=None):
     lbl_bibidh.pack_forget()
     entry_bibidh_detail.pack_forget()
     entry_bibidh_detail.delete(0, tk.END)
+    combo_acc_fund.set(FUND_DISPLAY["সাধারণ ফান্ড"])
+    set_categories_for_fund("সাধারণ ফান্ড")
 
-    if combo_acc_type.get() == "আয়":
-        combo_acc_cat['values'] = income_categories
-        combo_acc_cat.set(income_categories[0])
-    else:
-        combo_acc_cat['values'] = expense_categories
-        combo_acc_cat.set(expense_categories[0])
-    auto_select_fund(None)
+def fund_selected(event=None):
+    display_name = combo_acc_fund.get()
+    fund_name = FUND_BY_DISPLAY.get(display_name, display_name)
+    set_categories_for_fund(fund_name)
 
 # ইভেন্ট বাইন্ডিং সঠিকভাবে একত্রে যুক্ত করা হলো
 combo_acc_type.bind("<<ComboboxSelected>>", update_category_list)
+combo_acc_fund.bind("<<ComboboxSelected>>", fund_selected)
 
 def combined_category_handler(event):
     check_category_selection(event)
@@ -361,7 +398,7 @@ entry_acc_desc.grid(row=1, column=3, columnspan=3, pady=5, sticky="w")
 
 def save_transaction():
     t_type = combo_acc_type.get()
-    f_name = combo_acc_fund.get()
+    f_name = FUND_BY_DISPLAY.get(combo_acc_fund.get(), combo_acc_fund.get())
     cat = combo_acc_cat.get().strip()
     amount_str = entry_acc_amount.get().strip()
     desc = entry_acc_desc.get().strip()

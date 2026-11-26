@@ -1,0 +1,21 @@
+{
+  "name": "Madrasa Tkinter Desktop (Mobile Testing)",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {}
+  },
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y xvfb x11vnc fluxbox websockify python3-tk fonts-bengali && git clone https://github.com/novnc/noVNC.git /tmp/novnc",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python"
+      ]
+    }
+  },
+  "portsAttributes": {
+    "6080": {
+      "label": "noVNC Mobile Viewer (Tkinter GUI)",
+      "protocol": "http"
+    }
+  }
+}
